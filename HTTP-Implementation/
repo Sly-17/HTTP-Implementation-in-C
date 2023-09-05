@@ -1,0 +1,233 @@
+#pragma once
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <string.h>
+#include <assert.h>
+
+#define BUFFER_SIZE 200
+#define SMALL_BUFFER 20
+#define BUFFER_10 10
+#define BUFFER_20 20
+#define BUFFER_100 100
+#define BUFFER_200 200
+#define two_MB 4*1024*1024
+
+typedef struct{
+		char method[BUFFER_10];
+		char path[BUFFER_200];
+		char version[BUFFER_10];
+		char accept[BUFFER_200];
+		char connection[BUFFER_20];
+		char user_agent[BUFFER_100];
+		char body[two_MB];
+} HttpRequest;
+
+
+typedef struct{
+		int status;
+		char status_message[BUFFER_200];
+		char version[BUFFER_10];
+		char connection[BUFFER_20];
+		char content_type[BUFFER_200];
+		char datetime[BUFFER_100];
+		char body[two_MB];
+} HttpResponse;
+
+
+void error_and_die(const char* error){
+		printf("ERROR : %s\n", error);
+		exit(1);
+}
+
+
+HttpRequest* new_http_request(){
+		HttpRequest* req = (HttpRequest*)(malloc(sizeof(HttpRequest)));
+		return req;
+}
+
+
+HttpResponse* new_http_response(){
+		HttpResponse* res = (HttpResponse*)(malloc(sizeof(HttpResponse)));
+		return res;
+}
+
+
+void set_http_request_header(HttpRequest* req, const char* param, const char* value){
+		if(strcmp(param, "Method") == 0){
+				strcpy(req->method, value);
+		}else if(strcmp(param, "Path") == 0){
+				strcpy(req->path, value);
+		}else if(strcmp(param, "Version") == 0){
+				strcpy(req->version, value);
+		}else if(strcmp(param, "Accept") == 0){
+				strcpy(req->accept, value);
+		}else if(strcmp(param, "Connection") == 0){
+				strcpy(req->connection, value);
+		}else if(strcmp(param, "User-Agent") == 0){
+				strcpy(req->user_agent, value);
+		}
+
+}
+
+
+void set_http_response_header(HttpResponse* res, const char* param, const char* value){
+		if(strcmp(param, "Status") == 0){
+				res->status = atoi(value);
+		}else if(strcmp(param, "Status-Message") == 0){
+				strcpy(res->status_message, value);
+		}else if(strcmp(param, "Version") == 0){
+				strcpy(res->version, value);
+		}else if(strcmp(param, "Content-Type") == 0){
+				strcpy(res->content_type, value);
+		}else if(strcmp(param, "Connection") == 0){
+				strcpy(res->connection, value);
+		}else if(strcmp(param, "Date-Time") == 0){
+				strcpy(res->datetime, value);
+		}
+
+}
+/*
+   void set_http_body(HttpRequest* req, void* body){
+// Not creating a copy of body here as the body will remain atleast as long as the request is finished
+req->body = body;
+}
+ */
+
+
+
+
+
+void print_http_response(HttpResponse* res){
+		printf("Response Headers :\n");
+
+		printf("Status         : %d\n", res->status);
+		printf("Status Message : %s\n", res->status_message);
+		printf("Version        : %s\n", res->version);
+		printf("Connection     : %s\n", res->connection);
+		printf("Content-Type   : %s\n", res->content_type);
+		printf("Date-Time      : %s\n", res->datetime);
+		
+		printf("\n\n\n");
+}	
+
+
+
+
+void print_http_request(HttpRequest* req){
+		printf("Request Headers :\n");
+	
+		printf("Method         : %s\n", req->method);
+		printf("Path           : %s\n", req->path);
+		printf("Version        : %s\n", req->version);
+		printf("Accept         : %s\n", req->accept);
+		printf("Connection     : %s\n", req->connection);
+		printf("User-Agent     : %s\n", req->user_agent);
+		
+		printf("\n\n\n");
+}
+
+
+int server_sockfd;
+struct sockaddr_in address;
+int PORT = 9300;
+
+HttpResponse* make_http_request(HttpRequest* req, int PORT){
+
+		struct sockaddr_in server_address;
+		char buffer[BUFFER_SIZE] = {0};
+
+		int client_sockfd;
+		if((client_sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+				error_and_die("Could not create socket!!");
+		}
+
+
+		server_address.sin_family = AF_INET;
+		server_address.sin_port = htons(PORT);
+		server_address.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+
+		if(connect(client_sockfd, (struct sockaddr*)(&server_address), sizeof(server_address)) < 0){
+				error_and_die("Connect Error");
+		}
+
+		send(client_sockfd, req, sizeof(HttpRequest), 0);
+
+		HttpResponse* res = (HttpResponse*)(malloc(sizeof(HttpResponse)));
+		recv(client_sockfd, res, sizeof(HttpResponse), 0);
+
+		return res;
+
+}
+
+int start_http_server(const int port){
+		PORT = port;
+
+		if((server_sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
+				error_and_die("Could not create socket");
+		}
+
+		address.sin_family = AF_INET;
+		address.sin_port = htons(PORT);
+		address.sin_addr.s_addr = htonl(INADDR_ANY);
+
+
+		// Bind socket to PORT
+		if(bind(server_sockfd, (struct sockaddr*)(&address), sizeof(address)) < 0){
+				error_and_die("Bind error");
+		}
+
+		// Listen from PORT
+		if(listen(server_sockfd, 5) < 0){
+				error_and_die("Listen Error");
+		}
+
+
+}
+
+
+HttpRequest* accept_http_request(){
+
+		// Accept connection
+		int new_socket;
+		int addr_size = sizeof(address);
+
+		if((new_socket = accept(server_sockfd, (struct sockaddr*)(&address), (socklen_t*)(&addr_size))) < 0){
+				error_and_die("Accept Error");
+		}
+
+		HttpRequest* req = (HttpRequest*)(malloc(sizeof(HttpRequest)));
+		recv(new_socket, req, sizeof(HttpRequest), 0);
+		print_http_request(req);
+
+
+		HttpResponse* res = (HttpResponse*)(malloc(sizeof(HttpResponse)));
+
+		set_http_response_header(res, "Status", "200");
+		set_http_response_header(res, "Status-Message", "OK");
+		set_http_response_header(res, "Version", "http/1.0");
+		set_http_response_header(res, "Content-Type", "text/json");
+		set_http_response_header(res, "Connection", "close");
+		set_http_response_header(res, "Date-Time", "02/09/2023");
+		print_http_response(res);
+
+		send(new_socket, res, sizeof(HttpResponse), 0);
+		
+		printf("Here");
+		close(new_socket);
+
+		return req;
+
+}
+
+
+void close_http_server(int sockfd){
+	close(sockfd);
+}
